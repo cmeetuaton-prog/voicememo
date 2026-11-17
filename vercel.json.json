@@ -1,0 +1,69 @@
+import { GoogleGenAI } from "@google/genai";
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+};
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { audioBase64, mimeType, summaryType, outputLang } = req.body;
+
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'ไม่พบข้อมูลไฟล์เสียง' });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    const prompt = `คุณคือผู้ช่วยอัจฉริยะด้านการถอดความและสรุปข้อมูลเสียงระดับมืออาชีพ
+หน้าที่ของคุณคือ:
+1. ฟังไฟล์เสียงที่แนบมาอย่างละเอียด (เสียงอาจเป็นภาษาไทย ภาษาอังกฤษ หรือพูดปนกันทั้งไทยคำอังกฤษคำ)
+2. ถอดความคำพูดทั้งหมดออกมาให้ถูกต้อง แม่นยำ และจัดย่อหน้าให้อ่านง่าย (ใส่ในฟิลด์ "transcript")
+3. สรุปใจความสำคัญจากเสียงตามรูปแบบที่ผู้ใช้เลือก: "${summaryType}" (ใส่ในฟิลด์ "summary")
+4. ตั้งหัวข้อเรื่องที่กระชับและสื่อความหมายตรงกับเนื้อหา (ใส่ในฟิลด์ "title")
+
+เงื่อนไขสำคัญ:
+- ภาษาที่ใช้ในการเขียน "title" และ "summary" ต้องเป็น: "${outputLang}"
+- หากรูปแบบการสรุปเป็น "bullet" ให้ใช้สัญลักษณ์ • นำหน้าแต่ละข้อ
+- หากรูปแบบการสรุปเป็น "meeting" ให้แบ่งหัวข้อชัดเจน เช่น วัตถุประสงค์, ประเด็นสำคัญ, และสิ่งที่ต้องทำต่อ (Action Items)
+- ตอบกลับมาในรูปแบบ JSON เท่านั้น โดยมีโครงสร้างดังนี้:
+{
+  "title": "หัวข้อเรื่อง",
+  "summary": "เนื้อหาสรุป",
+  "transcript": "ข้อความที่ถอดเสียงทั้งหมด"
+}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        prompt,
+        {
+          inlineData: {
+            data: audioBase64,
+            mimeType: mimeType || 'audio/webm'
+          }
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.2
+      }
+    });
+
+    const resultJson = JSON.parse(response.text);
+    return res.status(200).json(resultJson);
+
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return res.status(500).json({ 
+      error: 'เกิดข้อผิดพลาดในการประมวลผลเสียง: ' + (error.message || 'Unknown error') 
+    });
+  }
+}
